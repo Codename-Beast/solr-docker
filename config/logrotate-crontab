@@ -1,0 +1,5 @@
+# Solr Log Rotation Crontab v2.5.0
+# Run logrotate daily at 2:00 AM
+
+# Min Hour Day Month Weekday Command
+0 2 * * * /usr/sbin/logrotate -s /var/solr/logs/logrotate.status /etc/logrotate.d/solr 2>&1 | tee -a /var/solr/logs/logrotate.log

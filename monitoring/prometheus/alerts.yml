@@ -1,0 +1,149 @@
+groups:
+  - name: solr_alerts
+    interval: 30s
+    rules:
+      # Solr Instance Down
+      - alert: SolrInstanceDown
+        expr: up{job="solr-exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: solr
+        annotations:
+          summary: "Solr instance is down"
+          description: "Solr exporter has been down for more than 2 minutes on {{ $labels.instance }}"
+
+      # High Memory Usage
+      - alert: SolrHighMemoryUsage
+        expr: (solr_metrics_jvm_memory_heap_used_bytes / solr_metrics_jvm_memory_heap_max_bytes) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          service: solr
+        annotations:
+          summary: "Solr memory usage is high"
+          description: "Solr heap memory usage is above 90% (current: {{ $value | humanizePercentage }}) on {{ $labels.instance }}"
+
+      # Critical Memory Usage
+      - alert: SolrCriticalMemoryUsage
+        expr: (solr_metrics_jvm_memory_heap_used_bytes / solr_metrics_jvm_memory_heap_max_bytes) * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+          service: solr
+        annotations:
+          summary: "Solr memory usage is critical"
+          description: "Solr heap memory usage is above 95% (current: {{ $value | humanizePercentage }}) on {{ $labels.instance }}"
+
+      # High GC Time
+      - alert: SolrHighGCTime
+        expr: rate(solr_metrics_jvm_gc_time_seconds_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: solr
+        annotations:
+          summary: "Solr is spending too much time in GC"
+          description: "Solr GC time rate is {{ $value | humanize }} seconds/second on {{ $labels.instance }}"
+
+      # Query Request Rate Drop
+      - alert: SolrQueryRateDropped
+        expr: rate(solr_metrics_core_requests_total{handler="/select"}[5m]) < 0.1 and rate(solr_metrics_core_requests_total{handler="/select"}[1h] offset 1h) > 1
+        for: 10m
+        labels:
+          severity: warning
+          service: solr
+        annotations:
+          summary: "Solr query rate has dropped significantly"
+          description: "Query rate has dropped below 0.1 queries/sec on {{ $labels.instance }}"
+
+      # High Query Error Rate
+      - alert: SolrHighErrorRate
+        expr: rate(solr_metrics_core_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          service: solr
+        annotations:
+          summary: "Solr error rate is high"
+          description: "Solr error rate is {{ $value | humanize }} errors/second on {{ $labels.instance }} core {{ $labels.core }}"
+
+      # Slow Queries
+      - alert: SolrSlowQueries
+        expr: histogram_quantile(0.95, rate(solr_metrics_core_query_time_seconds_bucket[5m])) > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: solr
+        annotations:
+          summary: "Solr queries are slow"
+          description: "95th percentile query time is {{ $value | humanizeDuration }} on {{ $labels.instance }} core {{ $labels.core }}"
+
+      # Low Cache Hit Ratio
+      - alert: SolrLowCacheHitRatio
+        expr: (solr_metrics_core_cache_hits / (solr_metrics_core_cache_hits + solr_metrics_core_cache_misses)) < 0.7
+        for: 15m
+        labels:
+          severity: warning
+          service: solr
+        annotations:
+          summary: "Solr cache hit ratio is low"
+          description: "Cache hit ratio is {{ $value | humanizePercentage }} on {{ $labels.instance }} cache {{ $labels.cache }}"
+
+      # Index Size Growing Rapidly
+      - alert: SolrIndexSizeGrowingRapidly
+        expr: rate(solr_metrics_core_index_size_bytes[1h]) > 10485760
+        for: 30m
+        labels:
+          severity: info
+          service: solr
+        annotations:
+          summary: "Solr index is growing rapidly"
+          description: "Index growth rate is {{ $value | humanize }}B/s on {{ $labels.instance }} core {{ $labels.core }}"
+
+      # No Recent Updates
+      - alert: SolrNoRecentUpdates
+        expr: time() - solr_metrics_core_update_handler_last_update_time > 3600
+        for: 10m
+        labels:
+          severity: info
+          service: solr
+        annotations:
+          summary: "No recent updates to Solr core"
+          description: "No updates for over 1 hour on {{ $labels.instance }} core {{ $labels.core }}"
+
+      # Exporter Down
+      - alert: SolrExporterDown
+        expr: up{job="solr-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: solr-exporter
+        annotations:
+          summary: "Solr Exporter is down"
+          description: "Solr Prometheus Exporter is not responding on {{ $labels.instance }}"
+
+  - name: system_alerts
+    interval: 30s
+    rules:
+      # Prometheus Down
+      - alert: PrometheusDown
+        expr: up{job="prometheus"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: prometheus
+        annotations:
+          summary: "Prometheus is down"
+          description: "Prometheus monitoring is not available"
+
+      # High Cardinality
+      - alert: PrometheusHighCardinality
+        expr: prometheus_tsdb_symbol_table_size_bytes > 100000000
+        for: 15m
+        labels:
+          severity: warning
+          service: prometheus
+        annotations:
+          summary: "Prometheus has high cardinality"
+          description: "Symbol table size is {{ $value | humanize }}B, consider reducing metrics"

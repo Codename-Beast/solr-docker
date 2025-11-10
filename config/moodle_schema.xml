@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+ Moodle Solr Schema Configuration
+ Compatible with: Moodle 4.1, 4.2, 4.3, 4.4, 5.0.x
+ Solr Version: 9.x
+
+ This schema is designed for Moodle's global search functionality.
+ Based on Moodle's Core solr plugin requirements.
+-->
+<schema name="moodle-schema" version="1.6">
+
+  <!-- FIELD TYPES -->
+
+  <!-- String type: exact matching -->
+  <fieldType name="string" class="solr.StrField" sortMissingLast="true" docValues="true"/>
+
+  <!-- Boolean type -->
+  <fieldType name="boolean" class="solr.BoolField" sortMissingLast="true"/>
+
+  <!-- Integer types -->
+  <fieldType name="pint" class="solr.IntPointField" docValues="true"/>
+  <fieldType name="plong" class="solr.LongPointField" docValues="true"/>
+  <fieldType name="pfloat" class="solr.FloatPointField" docValues="true"/>
+  <fieldType name="pdouble" class="solr.DoublePointField" docValues="true"/>
+  <fieldType name="pdate" class="solr.DatePointField" docValues="true"/>
+
+  <!-- Text type: for full-text search -->
+  <fieldType name="text_general" class="solr.TextField" positionIncrementGap="100" multiValued="true">
+    <analyzer type="index">
+      <tokenizer class="solr.StandardTokenizerFactory"/>
+      <filter class="solr.LowerCaseFilterFactory"/>
+      <filter class="solr.StopFilterFactory" ignoreCase="true" words="lang/stopwords.txt"/>
+      <filter class="solr.WordDelimiterGraphFilterFactory" generateWordParts="1" generateNumberParts="1" catenateWords="1" catenateNumbers="1" catenateAll="0" splitOnCaseChange="1"/>
+      <filter class="solr.FlattenGraphFilterFactory"/>
+    </analyzer>
+    <analyzer type="query">
+      <tokenizer class="solr.StandardTokenizerFactory"/>
+      <filter class="solr.LowerCaseFilterFactory"/>
+      <filter class="solr.StopFilterFactory" ignoreCase="true" words="lang/stopwords.txt"/>
+      <filter class="solr.WordDelimiterGraphFilterFactory" generateWordParts="1" generateNumberParts="1" catenateWords="0" catenateNumbers="0" catenateAll="0" splitOnCaseChange="1"/>
+    </analyzer>
+  </fieldType>
+
+  <!-- Text type with German support -->
+  <fieldType name="text_de" class="solr.TextField" positionIncrementGap="100">
+    <analyzer type="index">
+      <tokenizer class="solr.StandardTokenizerFactory"/>
+      <filter class="solr.LowerCaseFilterFactory"/>
+      <filter class="solr.StopFilterFactory" ignoreCase="true" words="lang/stopwords_de.txt" format="snowball"/>
+      <filter class="solr.GermanNormalizationFilterFactory"/>
+      <filter class="solr.GermanLightStemFilterFactory"/>
+    </analyzer>
+    <analyzer type="query">
+      <tokenizer class="solr.StandardTokenizerFactory"/>
+      <filter class="solr.LowerCaseFilterFactory"/>
+      <filter class="solr.StopFilterFactory" ignoreCase="true" words="lang/stopwords_de.txt" format="snowball"/>
+      <filter class="solr.GermanNormalizationFilterFactory"/>
+      <filter class="solr.GermanLightStemFilterFactory"/>
+    </analyzer>
+  </fieldType>
+
+  <!-- MOODLE REQUIRED FIELDS -->
+
+  <!-- Unique document identifier (required) -->
+  <field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false"/>
+
+  <!-- Document title -->
+  <field name="title" type="text_general" indexed="true" stored="true"/>
+
+  <!-- Document content (main searchable text) -->
+  <field name="content" type="text_general" indexed="true" stored="true"/>
+
+  <!-- Document description -->
+  <field name="description" type="text_general" indexed="true" stored="true"/>
+
+  <!-- Moodle context ID -->
+  <field name="contextid" type="pint" indexed="true" stored="true" required="true"/>
+
+  <!-- Moodle course ID -->
+  <field name="courseid" type="pint" indexed="true" stored="true" required="true"/>
+
+  <!-- User ID who owns/created the document -->
+  <field name="owneruserid" type="pint" indexed="true" stored="true" required="true"/>
+
+  <!-- Timestamp when document was modified -->
+  <field name="modified" type="pdate" indexed="true" stored="true" required="true"/>
+
+  <!-- Document type (e.g., forum_post, page, wiki, etc.) -->
+  <field name="type" type="string" indexed="true" stored="true" required="true"/>
+
+  <!-- Search area ID -->
+  <field name="areaid" type="string" indexed="true" stored="true" required="true"/>
+
+  <!-- Moodle item ID -->
+  <field name="itemid" type="pint" indexed="true" stored="true" required="true"/>
+
+  <!-- OPTIONAL MOODLE FIELDS -->
+
+  <!-- File ID for file attachments -->
+  <field name="solr_fileid" type="string" indexed="true" stored="true"/>
+
+  <!-- User ID who has access to view the document -->
+  <field name="userid" type="pint" indexed="true" stored="true"/>
+
+  <!-- Group ID -->
+  <field name="groupid" type="pint" indexed="true" stored="true"/>
+
+  <!-- Parent document ID -->
+  <field name="parentid" type="string" indexed="true" stored="true"/>
+
+  <!-- Additional metadata -->
+  <field name="intro" type="text_general" indexed="true" stored="true"/>
+
+  <!-- Author/user full name -->
+  <field name="username" type="text_general" indexed="true" stored="true"/>
+
+  <!-- File content (for file indexing) -->
+  <field name="filetext" type="text_general" indexed="true" stored="false"/>
+
+  <!-- Category ID -->
+  <field name="categoryid" type="pint" indexed="true" stored="true"/>
+
+  <!-- Module name -->
+  <field name="modname" type="string" indexed="true" stored="true"/>
+
+  <!-- URL to the document -->
+  <field name="docurl" type="string" indexed="false" stored="true"/>
+
+  <!-- SYSTEM FIELDS -->
+
+  <!-- Version field for optimistic concurrency -->
+  <field name="_version_" type="plong" indexed="false" stored="false"/>
+
+  <!-- Root field for nested documents -->
+  <field name="_root_" type="string" indexed="true" stored="false" docValues="false"/>
+
+  <!-- Catch-all field for unspecified fields -->
+  <field name="_text_" type="text_general" indexed="true" stored="false" multiValued="true"/>
+
+  <!-- Copy fields to catch-all -->
+  <copyField source="title" dest="_text_"/>
+  <copyField source="content" dest="_text_"/>
+  <copyField source="description" dest="_text_"/>
+  <copyField source="intro" dest="_text_"/>
+  <copyField source="username" dest="_text_"/>
+  <copyField source="filetext" dest="_text_"/>
+
+  <!-- UNIQUE KEY -->
+  <uniqueKey>id</uniqueKey>
+
+</schema>

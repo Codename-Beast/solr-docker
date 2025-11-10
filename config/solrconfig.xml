@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Solr Configuration for Moodle 4.0 - 5.0.x
+  Standalone Docker Edition
+
+  Optimized for:
+  - Moodle Global Search
+  - Fast indexing and search response
+  - Memory-efficient caching
+  - Auto-commit for real-time updates
+-->
+<config>
+  <!-- Lucene Match Version -->
+  <luceneMatchVersion>9.9.0</luceneMatchVersion>
+
+  <!-- Data Directory -->
+  <dataDir>${solr.data.dir:}</dataDir>
+
+  <!-- Directory Factory -->
+  <directoryFactory name="DirectoryFactory" class="${solr.directoryFactory:solr.NRTCachingDirectoryFactory}"/>
+
+  <!-- Index Configuration -->
+  <indexConfig>
+    <ramBufferSizeMB>256</ramBufferSizeMB>
+    <maxBufferedDocs>1000</maxBufferedDocs>
+    <useCompoundFile>false</useCompoundFile>
+    <mergePolicyFactory class="org.apache.solr.index.TieredMergePolicyFactory">
+      <int name="maxMergeAtOnce">10</int>
+      <int name="segmentsPerTier">10</int>
+    </mergePolicyFactory>
+    <mergeScheduler class="org.apache.lucene.index.ConcurrentMergeScheduler"/>
+    <lockType>${solr.lock.type:native}</lockType>
+    <writeLockTimeout>1000</writeLockTimeout>
+  </indexConfig>
+
+  <!-- Update Handler -->
+  <updateHandler class="solr.DirectUpdateHandler2">
+    <updateLog>
+      <str name="dir">${solr.ulog.dir:}</str>
+      <int name="numVersionBuckets">65536</int>
+    </updateLog>
+
+    <!-- Auto Commit -->
+    <autoCommit>
+      <maxTime>${solr.autoCommit.maxTime:15000}</maxTime>
+      <maxDocs>1000</maxDocs>
+      <openSearcher>false</openSearcher>
+    </autoCommit>
+
+    <!-- Auto Soft Commit -->
+    <autoSoftCommit>
+      <maxTime>${solr.autoSoftCommit.maxTime:1000}</maxTime>
+    </autoSoftCommit>
+  </updateHandler>
+
+  <!-- Query Configuration -->
+  <query>
+    <maxBooleanClauses>${solr.max.booleanClauses:2048}</maxBooleanClauses>
+    <filterCache class="solr.CaffeineCache"
+                 size="512"
+                 initialSize="512"
+                 autowarmCount="128"/>
+    <queryResultCache class="solr.CaffeineCache"
+                      size="512"
+                      initialSize="512"
+                      autowarmCount="128"/>
+    <documentCache class="solr.CaffeineCache"
+                   size="512"
+                   initialSize="512"
+                   autowarmCount="0"/>
+    <cache name="perSegFilter"
+           class="solr.CaffeineCache"
+           size="10"
+           initialSize="0"
+           autowarmCount="10"/>
+    <enableLazyFieldLoading>true</enableLazyFieldLoading>
+    <queryResultWindowSize>20</queryResultWindowSize>
+    <queryResultMaxDocsCached>200</queryResultMaxDocsCached>
+    <useColdSearcher>false</useColdSearcher>
+  </query>
+
+  <!-- Request Dispatcher -->
+  <requestDispatcher>
+    <requestParsers enableRemoteStreaming="false"
+                    multipartUploadLimitInKB="2048000"
+                    formdataUploadLimitInKB="2048"
+                    addHttpRequestToContext="false"/>
+    <httpCaching never304="true"/>
+  </requestDispatcher>
+
+  <!-- Request Handlers -->
+
+  <!-- Standard Request Handler -->
+  <requestHandler name="/select" class="solr.SearchHandler">
+    <lst name="defaults">
+      <str name="echoParams">explicit</str>
+      <int name="rows">10</int>
+      <str name="df">content</str>
+      <str name="wt">json</str>
+      <str name="indent">true</str>
+    </lst>
+  </requestHandler>
+
+  <!-- Update Request Handler -->
+  <requestHandler name="/update" class="solr.UpdateRequestHandler"/>
+
+  <!-- Moodle-specific Search Handler -->
+  <requestHandler name="/moodle" class="solr.SearchHandler">
+    <lst name="defaults">
+      <str name="echoParams">explicit</str>
+      <str name="wt">json</str>
+      <str name="indent">true</str>
+      <str name="df">content</str>
+      <int name="rows">10</int>
+      <str name="q.op">AND</str>
+      <str name="qf">title^5.0 content^2.0</str>
+      <str name="pf">title^10.0 content^5.0</str>
+      <int name="ps">3</int>
+      <str name="mm">2&lt;-1 5&lt;-2 6&lt;90%</str>
+      <bool name="lowercaseOperators">true</bool>
+    </lst>
+  </requestHandler>
+
+  <!-- Admin Handlers -->
+  <requestHandler name="/admin/ping" class="solr.PingRequestHandler">
+    <lst name="invariants">
+      <str name="q">solrpingquery</str>
+    </lst>
+    <lst name="defaults">
+      <str name="echoParams">all</str>
+    </lst>
+  </requestHandler>
+
+  <!-- Schema API Handler -->
+  <requestHandler name="/schema" class="solr.SchemaHandler">
+    <lst name="defaults">
+      <str name="df">content</str>
+    </lst>
+  </requestHandler>
+
+  <!-- Config API Handler -->
+  <requestHandler name="/config" class="solr.ConfigHandler">
+    <lst name="invariants">
+      <str name="enable">true</str>
+    </lst>
+  </requestHandler>
+
+  <!-- Analysis Request Handler -->
+  <requestHandler name="/analysis/field"
+                  startup="lazy"
+                  class="solr.FieldAnalysisRequestHandler"/>
+
+  <!-- Admin Request Handler -->
+  <admin>
+    <defaultQuery>*:*</defaultQuery>
+  </admin>
+
+</config>

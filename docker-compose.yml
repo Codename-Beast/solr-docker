@@ -1,0 +1,362 @@
+# ============================================================================
+# Solr Moodle Docker Compose v3.3.0
+#
+# Profiles:
+#   default         - Only Solr (production minimal)
+#   monitoring      - Add local monitoring stack
+#   exporter-only   - Only Solr + Exporter (for remote monitoring)
+#   backup          - Add automated backup service
+#   logrotate       - Add log rotation service (v2.5.0)
+#
+# Network Segmentation (v2.4.0):
+#   frontend_network (172.20.0.0/24) - External access (Solr, Health API, Grafana)
+#   backend_network  (172.20.1.0/24) - Internal monitoring (Prometheus, Alertmanager, Exporter)
+#
+# Usage:
+#   docker compose up -d                              # Solr only
+#   docker compose --profile monitoring up -d         # With monitoring
+#   docker compose --profile exporter-only up -d      # Exporter for remote
+#   docker compose --profile backup up -d             # With automated backups
+#   docker compose --profile logrotate up -d          # With log rotation
+# ============================================================================
+
+services:
+  # ============================================================================
+  # CORE SERVICES (Always deployed)
+  # ============================================================================
+
+  solr-init:
+    image: alpine:3.20
+    container_name: ${CUSTOMER_NAME}_solr_init
+    volumes:
+      - solr_data:/var/solr/data          # Data volume
+      - solr_logs:/var/solr/logs          # Logs volume (needs permission setup)
+      - solr_backups:/var/solr/backups    # Backups volume (needs permission setup)
+      - ${SOLR_CONFIG_DIR:-./config}:/config:ro
+      - ./lang:/lang:ro
+      - ./scripts/init-container.sh:/scripts/init.sh:ro
+    command: ["/bin/sh", "/scripts/init.sh"]
+    networks:
+      - frontend_network
+    restart: "no"
+
+  solr:
+    image: solr:${SOLR_VERSION:-9.9.0}
+    container_name: ${CUSTOMER_NAME}_solr
+    depends_on:
+      solr-init:
+        condition: service_completed_successfully
+    ports:
+      - "${SOLR_BIND_IP:-127.0.0.1}:${SOLR_PORT:-8983}:8983"
+    volumes:
+      - solr_data:/var/solr/data          # Data directory as named volume
+      - solr_logs:/var/solr/logs          # Logs as named volume (fixes permission issues)
+      - solr_backups:/var/solr/backups    # Backups as named volume
+    environment:
+      SOLR_HEAP: ${SOLR_HEAP_SIZE:-2g}
+      SOLR_JAVA_MEM: "-Xms${SOLR_HEAP_SIZE:-2g} -Xmx${SOLR_HEAP_SIZE:-2g}"
+      SOLR_LOG_LEVEL: ${SOLR_LOG_LEVEL:-INFO}
+      SOLR_STOP_WAIT: 30
+      GC_LOG_OPTS: >-
+        -Xlog:gc*,safepoint:file=/var/solr/logs/gc.log:time,uptime,level,tags:filecount=10,filesize=10M
+      SOLR_OPTS: >-
+        -XX:+UseG1GC
+        -XX:+ParallelRefProcEnabled
+        -XX:G1HeapRegionSize=32m
+        -XX:MaxGCPauseMillis=150
+        -XX:InitiatingHeapOccupancyPercent=75
+        -XX:+UnlockExperimentalVMOptions
+        -XX:+AlwaysPreTouch
+        -Dsolr.jetty.graceful.shutdown=true
+        -Dsolr.autoSoftCommit.maxTime=${SOLR_AUTO_SOFT_COMMIT_TIME:-1000}
+        -Dsolr.autoCommit.maxTime=${SOLR_AUTO_COMMIT_TIME:-15000}
+    networks:
+      - frontend_network  # External access
+      - backend_network   # Monitoring access
+    restart: unless-stopped
+    user: "8983:8983"
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8983/ > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: ${SOLR_MEMORY_LIMIT:-4g}
+          cpus: '${SOLR_CPU_LIMIT:-2.0}'
+        reservations:
+          memory: ${SOLR_HEAP_SIZE:-2g}
+          cpus: '${SOLR_CPU_RESERVATION:-0.5}'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # HEALTH API
+  # ============================================================================
+
+  health-api:
+    image: python:3.11-alpine
+    container_name: ${CUSTOMER_NAME}_health_api
+    depends_on:
+      solr:
+        condition: service_healthy
+    ports:
+      - "${HEALTH_API_PORT:-8888}:8888"
+    volumes:
+      - ./scripts/health-api.py:/app/health-api.py:ro
+      - solr_data:/var/solr/data:ro       # Only needs data directory
+    command: ["sh", "-c", "apk add --no-cache curl && python /app/health-api.py"]
+    networks:
+      - frontend_network  # External access for health checks
+    restart: unless-stopped
+    environment:
+      SOLR_URL: "http://solr:8983"
+      CUSTOMER_NAME: ${CUSTOMER_NAME}
+      SOLR_ADMIN_USER: ${SOLR_ADMIN_USER}
+      SOLR_ADMIN_PASSWORD: ${SOLR_ADMIN_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8888/ping || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: '0.2'
+
+  # ============================================================================
+  # MONITORING SERVICES (Optional - Profile: monitoring or exporter-only)
+  # ============================================================================
+
+  solr-exporter:
+    profiles: ["monitoring", "exporter-only"]
+    image: solr:${SOLR_VERSION:-9.9.0}
+    container_name: ${CUSTOMER_NAME}_solr_exporter
+    depends_on:
+      solr:
+        condition: service_healthy
+    ports:
+      - "${EXPORTER_BIND_IP:-127.0.0.1}:${EXPORTER_PORT:-9854}:9854"
+    command: >
+      bash -c "/opt/solr/contrib/prometheus-exporter/bin/solr-exporter
+      -p 9854
+      -b http://solr:8983/solr
+      -f /opt/solr/contrib/prometheus-exporter/conf/solr-exporter-config.xml
+      -n 16"
+    environment:
+      JAVA_OPTS: "-Xms256m -Xmx512m"
+    networks:
+      - backend_network  # Internal monitoring network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9854/metrics || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v2.48.0
+    container_name: ${CUSTOMER_NAME}_prometheus
+    depends_on:
+      - solr-exporter
+    ports:
+      - "${PROMETHEUS_BIND_IP:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-30d}'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - backend_network  # Internal monitoring network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9090/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: '1.0'
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:10.2.2
+    container_name: ${CUSTOMER_NAME}_grafana
+    depends_on:
+      - prometheus
+    ports:
+      - "${GRAFANA_BIND_IP:-0.0.0.0}:${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    networks:
+      - frontend_network  # External access for UI
+      - backend_network   # Access to Prometheus
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+
+  alertmanager:
+    profiles: ["monitoring"]
+    image: prom/alertmanager:v0.26.0
+    container_name: ${CUSTOMER_NAME}_alertmanager
+    depends_on:
+      - prometheus
+    ports:
+      - "${ALERTMANAGER_BIND_IP:-127.0.0.1}:${ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ./monitoring/alertmanager:/etc/alertmanager:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+    networks:
+      - backend_network  # Internal monitoring network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9093/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.3'
+
+  # ============================================================================
+  # BACKUP SERVICE (Optional - Profile: backup)
+  # ============================================================================
+
+  backup-cron:
+    profiles: ["backup"]
+    image: alpine:3.20
+    container_name: ${CUSTOMER_NAME}_backup_cron
+    depends_on:
+      solr:
+        condition: service_healthy
+    volumes:
+      - ./scripts/backup-cron.sh:/scripts/backup-cron.sh:ro
+      - ./scripts/lib:/scripts/lib:ro
+      - ./config/backup-crontab:/etc/crontabs/root:ro
+      - solr_data:/var/solr/data:ro
+      - solr_backups:/var/solr/backups
+    environment:
+      CUSTOMER_NAME: ${CUSTOMER_NAME}
+      SOLR_HOST: "solr:8983"
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_WEBHOOK_URL: ${BACKUP_WEBHOOK_URL:-}
+    command: crond -f -l 2
+    networks:
+      - backend_network  # Access to Solr for backups
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: '0.1'
+
+  # ============================================================================
+  # LOG ROTATION SERVICE (Optional - Profile: logrotate)
+  # ============================================================================
+
+  log-rotator:
+    profiles: ["logrotate"]
+    image: alpine:3.20
+    container_name: ${CUSTOMER_NAME}_log_rotator
+    depends_on:
+      - solr
+    volumes:
+      - solr_logs:/var/solr/logs
+      - ./config/logrotate.conf:/etc/logrotate.d/solr:ro
+      - ./config/logrotate-crontab:/etc/crontabs/root:ro
+    command: sh -c "apk add --no-cache logrotate && crond -f -l 2"
+    networks:
+      - backend_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+          cpus: '0.1'
+
+# ============================================================================
+# VOLUMES
+# ============================================================================
+
+volumes:
+  solr_data:
+    driver: local
+    name: ${CUSTOMER_NAME}_solr_data
+  solr_logs:
+    driver: local
+    name: ${CUSTOMER_NAME}_solr_logs
+  solr_backups:
+    driver: local
+    name: ${CUSTOMER_NAME}_solr_backups
+  prometheus_data:
+    driver: local
+    name: ${CUSTOMER_NAME}_prometheus_data
+  grafana_data:
+    driver: local
+    name: ${CUSTOMER_NAME}_grafana_data
+  alertmanager_data:
+    driver: local
+    name: ${CUSTOMER_NAME}_alertmanager_data
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
+
+networks:
+  # Frontend network - External access (ports exposed)
+  # Contains: Solr, Health API, Grafana
+  frontend_network:
+    driver: bridge
+    name: ${CUSTOMER_NAME}_frontend
+
+  # Backend network - Internal monitoring communication only
+  # Contains: Prometheus, Alertmanager, Solr Exporter
+  # Isolated from direct external access
+  backend_network:
+    driver: bridge
+    name: ${CUSTOMER_NAME}_backend
+    internal: false  # Set to true for complete isolation
+
+

@@ -1,0 +1,52 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'solr-moodle'
+    environment: 'production'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# Load rules once and periodically evaluate them
+rule_files:
+  - "alerts.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+  # Solr Exporter
+  - job_name: 'solr-exporter'
+    scrape_interval: 10s
+    scrape_timeout: 10s
+    static_configs:
+      - targets: ['solr-exporter:9854']
+        labels:
+          service: 'solr'
+          instance: 'solr-main'
+    metric_relabel_configs:
+      # Keep only important metrics
+      - source_labels: [__name__]
+        regex: 'solr.*'
+        action: keep
+
+  # Solr Admin Metrics (optional, requires auth)
+  - job_name: 'solr-admin'
+    scrape_interval: 30s
+    metrics_path: '/solr/admin/metrics'
+    params:
+      wt: ['prometheus']
+    static_configs:
+      - targets: ['solr:8983']
+        labels:
+          service: 'solr-admin'

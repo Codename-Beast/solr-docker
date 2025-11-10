@@ -1,0 +1,148 @@
+global:
+  resolve_timeout: 5m
+  # SMTP is OPTIONAL - only configured if SMTP_ENABLED=true
+  smtp_smarthost: '${SMTP_HOST:-localhost:25}'
+  smtp_from: '${SMTP_FROM:-alertmanager@example.com}'
+  smtp_auth_username: '${SMTP_USER:-}'
+  smtp_auth_password: '${SMTP_PASS:-}'
+  smtp_require_tls: ${SMTP_TLS:-false}
+
+# Templates
+templates:
+  - '/etc/alertmanager/*.tmpl'
+
+# Route configuration
+route:
+  receiver: 'default'
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  routes:
+    # Critical alerts
+    - match:
+        severity: critical
+      receiver: 'critical'
+      group_wait: 10s
+      repeat_interval: 5m
+
+    # Warning alerts
+    - match:
+        severity: warning
+      receiver: 'warning'
+      group_wait: 30s
+      repeat_interval: 1h
+
+    # Info alerts
+    - match:
+        severity: info
+      receiver: 'info'
+      group_wait: 5m
+      repeat_interval: 24h
+
+# Inhibition rules
+inhibit_rules:
+  # Inhibit warning if critical is firing
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'cluster', 'service']
+
+  # Inhibit info if warning is firing
+  - source_match:
+      severity: 'warning'
+    target_match:
+      severity: 'info'
+    equal: ['alertname', 'cluster', 'service']
+
+# Receivers (conditionally enabled based on .env)
+receivers:
+  # Default receiver (always active)
+  - name: 'default'
+    # MS Teams disabled by default
+    # webhook_configs:
+    #   - url: '${MS_TEAMS_WEBHOOK_URL}'
+    #     send_resolved: true
+
+  # Critical alerts receiver
+  - name: 'critical'
+    # Email only if SMTP_ENABLED=true (uncomment when needed)
+    # email_configs:
+    #   - to: '${ALERT_EMAIL_CRITICAL:-admin@example.com}'
+    #     headers:
+    #       Subject: '[CRITICAL] Solr Alert: {{ .GroupLabels.alertname }}'
+    #     html: |
+    #       <h2>Critical Alert Fired</h2>
+    #       <p><strong>Alert:</strong> {{ .GroupLabels.alertname }}</p>
+    #       <p><strong>Service:</strong> {{ .GroupLabels.service }}</p>
+    #       <p><strong>Severity:</strong> {{ .CommonLabels.severity }}</p>
+    #       {{ range .Alerts }}
+    #       <p><strong>Description:</strong> {{ .Annotations.description }}</p>
+    #       <p><strong>Summary:</strong> {{ .Annotations.summary }}</p>
+    #       {{ end }}
+    #     send_resolved: true
+
+    # MS Teams if MS_TEAMS_ENABLED=true (uncomment when needed)
+    # webhook_configs:
+    #   - url: '${MS_TEAMS_WEBHOOK_URL}'
+    #     send_resolved: true
+    #     http_config:
+    #       follow_redirects: true
+
+    # Generic webhook if WEBHOOK_ENABLED=true (uncomment when needed)
+    webhook_configs:
+      - url: '${WEBHOOK_URL_CRITICAL:-http://localhost:5001/alerts}'
+        send_resolved: true
+
+  # Warning alerts receiver
+  - name: 'warning'
+    # Email only if SMTP_ENABLED=true (uncomment when needed)
+    # email_configs:
+    #   - to: '${ALERT_EMAIL_WARNING:-admin@example.com}'
+    #     headers:
+    #       Subject: '[WARNING] Solr Alert: {{ .GroupLabels.alertname }}'
+    #     send_resolved: true
+
+    # MS Teams if MS_TEAMS_ENABLED=true (uncomment when needed)
+    # webhook_configs:
+    #   - url: '${MS_TEAMS_WEBHOOK_URL}'
+    #     send_resolved: true
+
+  # Info alerts receiver
+  - name: 'info'
+    # Generic webhook if WEBHOOK_ENABLED=true (uncomment when needed)
+    webhook_configs:
+      - url: '${WEBHOOK_URL_INFO:-http://localhost:5001/alerts}'
+        send_resolved: true
+
+# =============================================================================
+# CONFIGURATION GUIDE
+# =============================================================================
+#
+# To enable specific alert channels, edit your .env file:
+#
+# 1. Email Alerts:
+#    SMTP_ENABLED=true
+#    SMTP_HOST=smtp.gmail.com:587
+#    SMTP_USER=your-email@gmail.com
+#    SMTP_PASS=your-app-password
+#    SMTP_TLS=true
+#    ALERT_EMAIL_CRITICAL=admin@example.com
+#
+#    Then uncomment the email_configs sections above
+#
+# 2. MS Teams:
+#    MS_TEAMS_ENABLED=true
+#    MS_TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/...
+#
+#    Then uncomment the MS Teams webhook_configs sections above
+#
+# 3. Generic Webhook:
+#    WEBHOOK_ENABLED=true
+#    WEBHOOK_URL_CRITICAL=https://your-webhook.com/critical
+#    WEBHOOK_URL_INFO=https://your-webhook.com/info
+#
+#    The webhook_configs are already enabled by default
+#
+# =============================================================================
