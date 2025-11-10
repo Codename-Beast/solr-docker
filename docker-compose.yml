@@ -144,11 +144,13 @@ services:
         condition: service_healthy
     ports:
       - "${EXPORTER_BIND_IP:-127.0.0.1}:${EXPORTER_PORT:-9854}:9854"
+    volumes:
+      - ${SOLR_CONFIG_DIR:-./config}/solr-exporter-config.xml:/opt/solr-exporter-config.xml:ro
     command: >
       bash -c "/opt/solr/contrib/prometheus-exporter/bin/solr-exporter
       -p 9854
       -b http://solr:8983/solr
-      -f /opt/solr/contrib/prometheus-exporter/conf/solr-exporter-config.xml
+      -f /opt/solr-exporter-config.xml
       -n 16"
     environment:
       JAVA_OPTS: "-Xms256m -Xmx512m"

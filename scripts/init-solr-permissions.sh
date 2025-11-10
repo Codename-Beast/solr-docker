@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Initialize Solr directories with correct permissions
 # Only touches Solr-specific directories: logs, data, backups
+# Debian/Ubuntu compatible version
 
 set -euo pipefail
 
@@ -33,6 +34,37 @@ echo ""
 log_info "Preparing directories for Solr container (UID:GID ${SOLR_UID}:${SOLR_GID})"
 echo ""
 
+# Detect OS for stat command compatibility
+OS_TYPE="unknown"
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS_TYPE="$ID"
+fi
+
+# Function to get file ownership in a cross-platform way
+# Works on Debian/Ubuntu, Fedora/RHEL, and macOS
+get_owner() {
+    local path="$1"
+    if [ -d "$path" ] || [ -f "$path" ]; then
+        # Try GNU stat (Linux)
+        if stat -c '%u:%g' "$path" 2>/dev/null; then
+            return 0
+        # Try BSD stat (macOS)
+        elif stat -f '%u:%g' "$path" 2>/dev/null; then
+            return 0
+        # Fallback to ls parsing (works everywhere)
+        else
+            local uid gid
+            uid=$(ls -ldn "$path" | awk '{print $3}')
+            gid=$(ls -ldn "$path" | awk '{print $4}')
+            echo "${uid}:${gid}"
+            return 0
+        fi
+    fi
+    echo "unknown"
+    return 1
+}
+
 # Function to run command with sudo if needed
 # Try without sudo first, fall back to sudo if permission denied
 run_cmd() {
@@ -41,12 +73,30 @@ run_cmd() {
         "$@"
     else
         # Try without sudo first
-        "$@" 2>/dev/null || {
-            # If failed, try with sudo
-            sudo "$@"
-        }
+        if ! "$@" 2>/dev/null; then
+            # If failed, check if sudo is available
+            if command -v sudo >/dev/null 2>&1; then
+                log_warn "Permission denied, trying with sudo..."
+                sudo "$@"
+            else
+                log_error "Permission denied and sudo not available"
+                log_error "Please run this script as root or install sudo"
+                return 1
+            fi
+        fi
     fi
 }
+
+# Detect if running in Docker volume mode
+# If directories don't exist yet, Docker will create them
+# This is expected and not an error
+USING_DOCKER_VOLUMES=false
+if command -v docker >/dev/null 2>&1; then
+    if docker volume ls 2>/dev/null | grep -q "${CUSTOMER_NAME:-solr}"; then
+        USING_DOCKER_VOLUMES=true
+        log_info "Detected Docker volumes in use"
+    fi
+fi
 
 # Create and set permissions for each Solr directory
 for dir in "${SOLR_DIRS[@]}"; do
@@ -55,23 +105,37 @@ for dir in "${SOLR_DIRS[@]}"; do
     # Create directory if it doesn't exist
     if [ ! -d "$dir_path" ]; then
         log_info "Creating directory: $dir"
-        run_cmd mkdir -p "$dir_path"
+        if ! run_cmd mkdir -p "$dir_path"; then
+            if [ "$USING_DOCKER_VOLUMES" = true ]; then
+                log_warn "Cannot create $dir (Docker will create it as volume)"
+                continue
+            else
+                log_error "Failed to create $dir"
+                exit 1
+            fi
+        fi
     fi
 
-    # Get current owner
-    current_owner=$(stat -c '%u:%g' "$dir_path" 2>/dev/null || echo "unknown")
+    # Get current owner using cross-platform function
+    current_owner=$(get_owner "$dir_path")
 
     # Set ownership to Solr user
     if [ "$current_owner" != "${SOLR_UID}:${SOLR_GID}" ]; then
-        log_info "Setting ownership: $dir → ${SOLR_UID}:${SOLR_GID}"
-        run_cmd chown -R ${SOLR_UID}:${SOLR_GID} "$dir_path"
+        log_info "Setting ownership: $dir → ${SOLR_UID}:${SOLR_GID} (current: $current_owner)"
+        if ! run_cmd chown -R ${SOLR_UID}:${SOLR_GID} "$dir_path"; then
+            log_error "Failed to set ownership for $dir"
+            exit 1
+        fi
     else
         log_success "Ownership OK: $dir (already ${SOLR_UID}:${SOLR_GID})"
     fi
 
     # Set permissions: 755 (rwxr-xr-x)
     log_info "Setting permissions: $dir → 755"
-    run_cmd chmod -R 755 "$dir_path"
+    if ! run_cmd chmod -R 755 "$dir_path"; then
+        log_error "Failed to set permissions for $dir"
+        exit 1
+    fi
 done
 
 echo ""
@@ -79,9 +143,17 @@ log_success "All Solr directories initialized!"
 echo ""
 echo "Directories prepared:"
 for dir in "${SOLR_DIRS[@]}"; do
-    echo "  ✓ $dir/ (owned by ${SOLR_UID}:${SOLR_GID})"
+    dir_path="$PROJECT_DIR/$dir"
+    if [ -d "$dir_path" ]; then
+        current_owner=$(get_owner "$dir_path")
+        echo "  ✓ $dir/ (owned by ${current_owner})"
+    else
+        echo "  ⚠ $dir/ (will be created by Docker)"
+    fi
 done
 echo ""
 echo "These directories are now writable by Solr container."
 echo "No other directories were modified."
+echo ""
+echo "OS detected: $OS_TYPE"
 echo "========================================"

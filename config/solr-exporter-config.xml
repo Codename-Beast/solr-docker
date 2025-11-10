@@ -1,0 +1,467 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Solr Prometheus Exporter Configuration for Moodle
+  Version: 3.5.0
+
+  This configuration exports key Solr metrics to Prometheus for monitoring.
+  Optimized for Moodle search workloads.
+
+  Official Documentation:
+  https://solr.apache.org/guide/solr/latest/deployment-guide/monitoring-with-prometheus-and-grafana.html
+-->
+<config>
+
+  <!-- ========================================================================
+       PING METRICS
+       Monitors Solr availability and response time
+       ======================================================================== -->
+  <ping>
+    <lst name="request">
+      <lst name="query">
+        <str name="path">/admin/ping</str>
+      </lst>
+      <arr name="jsonQueries">
+        <str>
+          .status as $status |
+          {
+            name: "solr_ping",
+            type: "GAUGE",
+            help: "Solr ping status (1 = OK, 0 = FAILED)",
+            label_names: [],
+            label_values: [],
+            value: (if $status == "OK" then 1 else 0 end)
+          }
+        </str>
+      </arr>
+    </lst>
+  </ping>
+
+  <!-- ========================================================================
+       CORE/COLLECTION METRICS
+       Monitors index size, document count, and core status
+       ======================================================================== -->
+  <metrics>
+    <!-- Core Admin Metrics -->
+    <lst name="request">
+      <lst name="query">
+        <str name="path">/admin/cores</str>
+        <lst name="params">
+          <str name="action">STATUS</str>
+        </lst>
+      </lst>
+      <arr name="jsonQueries">
+        <!-- Number of documents -->
+        <str>
+          .status | to_entries | .[] | select(.value.index.numDocs != null) |
+          {
+            name: "solr_core_index_num_docs",
+            type: "GAUGE",
+            help: "Total number of indexed documents",
+            label_names: ["core"],
+            label_values: [.key],
+            value: .value.index.numDocs
+          }
+        </str>
+
+        <!-- Index size in bytes -->
+        <str>
+          .status | to_entries | .[] | select(.value.index.sizeInBytes != null) |
+          {
+            name: "solr_core_index_size_bytes",
+            type: "GAUGE",
+            help: "Index size in bytes",
+            label_names: ["core"],
+            label_values: [.key],
+            value: .value.index.sizeInBytes
+          }
+        </str>
+
+        <!-- Deleted documents -->
+        <str>
+          .status | to_entries | .[] | select(.value.index.deletedDocs != null) |
+          {
+            name: "solr_core_index_deleted_docs",
+            type: "GAUGE",
+            help: "Number of deleted documents",
+            label_names: ["core"],
+            label_values: [.key],
+            value: .value.index.deletedDocs
+          }
+        </str>
+
+        <!-- Max documents -->
+        <str>
+          .status | to_entries | .[] | select(.value.index.maxDoc != null) |
+          {
+            name: "solr_core_index_max_doc",
+            type: "GAUGE",
+            help: "Maximum document number",
+            label_names: ["core"],
+            label_values: [.key],
+            value: .value.index.maxDoc
+          }
+        </str>
+      </arr>
+    </lst>
+
+    <!-- ======================================================================
+         QUERY PERFORMANCE METRICS
+         Monitors search query performance
+         ====================================================================== -->
+    <lst name="request">
+      <lst name="query">
+        <str name="path">/admin/metrics</str>
+        <lst name="params">
+          <str name="group">core</str>
+          <str name="prefix">QUERY./select</str>
+        </lst>
+      </lst>
+      <arr name="jsonQueries">
+        <!-- Query request count -->
+        <str>
+          .metrics | to_entries | .[] |
+          select(.key | startswith("solr.core.")) |
+          .key as $core |
+          .value | to_entries | .[] |
+          select(.key == "QUERY./select.requests") |
+          {
+            name: "solr_query_requests_total",
+            type: "COUNTER",
+            help: "Total number of query requests",
+            label_names: ["core", "handler"],
+            label_values: [$core | split(".")[2], "select"],
+            value: .value.count
+          }
+        </str>
+
+        <!-- Query response time (mean) -->
+        <str>
+          .metrics | to_entries | .[] |
+          select(.key | startswith("solr.core.")) |
+          .key as $core |
+          .value | to_entries | .[] |
+          select(.key == "QUERY./select.requestTimes") |
+          {
+            name: "solr_query_response_time_ms",
+            type: "GAUGE",
+            help: "Query response time in milliseconds (mean)",
+            label_names: ["core", "handler", "quantile"],
+            label_values: [$core | split(".")[2], "select", "mean"],
+            value: .value.mean
+          }
+        </str>
+
+        <!-- Query response time (p50) -->
+        <str>
+          .metrics | to_entries | .[] |
+          select(.key | startswith("solr.core.")) |
+          .key as $core |
+          .value | to_entries | .[] |
+          select(.key == "QUERY./select.requestTimes") |
+          {
+            name: "solr_query_response_time_ms",
+            type: "GAUGE",
+            help: "Query response time in milliseconds (p50)",
+            label_names: ["core", "handler", "quantile"],
+            label_values: [$core | split(".")[2], "select", "p50"],
+            value: .value.p50
+          }
+        </str>
+
+        <!-- Query response time (p95) -->
+        <str>
+          .metrics | to_entries | .[] |
+          select(.key | startswith("solr.core.")) |
+          .key as $core |
+          .value | to_entries | .[] |
+          select(.key == "QUERY./select.requestTimes") |
+          {
+            name: "solr_query_response_time_ms",
+            type: "GAUGE",
+            help: "Query response time in milliseconds (p95)",
+            label_names: ["core", "handler", "quantile"],
+            label_values: [$core | split(".")[2], "select", "p95"],
+            value: .value.p95
+          }
+        </str>
+
+        <!-- Query response time (p99) -->
+        <str>
+          .metrics | to_entries | .[] |
+          select(.key | startswith("solr.core.")) |
+          .key as $core |
+          .value | to_entries | .[] |
+          select(.key == "QUERY./select.requestTimes") |
+          {
+            name: "solr_query_response_time_ms",
+            type: "GAUGE",
+            help: "Query response time in milliseconds (p99)",
+            label_names: ["core", "handler", "quantile"],
+            label_values: [$core | split(".")[2], "select", "p99"],
+            value: .value.p99
+          }
+        </str>
+      </arr>
+    </lst>
+
+    <!-- ======================================================================
+         UPDATE/INDEX PERFORMANCE METRICS
+         Monitors document indexing performance
+         ====================================================================== -->
+    <lst name="request">
+      <lst name="query">
+        <str name="path">/admin/metrics</str>
+        <lst name="params">
+          <str name="group">core</str>
+          <str name="prefix">UPDATE./update</str>
+        </lst>
+      </lst>
+      <arr name="jsonQueries">
+        <!-- Update request count -->
+        <str>
+          .metrics | to_entries | .[] |
+          select(.key | startswith("solr.core.")) |
+          .key as $core |
+          .value | to_entries | .[] |
+          select(.key == "UPDATE./update.requests") |
+          {
+            name: "solr_update_requests_total",
+            type: "COUNTER",
+            help: "Total number of update requests",
+            label_names: ["core", "handler"],
+            label_values: [$core | split(".")[2], "update"],
+            value: .value.count
+          }
+        </str>
+
+        <!-- Update response time (mean) -->
+        <str>
+          .metrics | to_entries | .[] |
+          select(.key | startswith("solr.core.")) |
+          .key as $core |
+          .value | to_entries | .[] |
+          select(.key == "UPDATE./update.requestTimes") |
+          {
+            name: "solr_update_response_time_ms",
+            type: "GAUGE",
+            help: "Update response time in milliseconds (mean)",
+            label_names: ["core", "handler", "quantile"],
+            label_values: [$core | split(".")[2], "update", "mean"],
+            value: .value.mean
+          }
+        </str>
+      </arr>
+    </lst>
+
+    <!-- ======================================================================
+         CACHE METRICS
+         Monitors Solr cache efficiency (queryResultCache, documentCache, filterCache)
+         ====================================================================== -->
+    <lst name="request">
+      <lst name="query">
+        <str name="path">/admin/metrics</str>
+        <lst name="params">
+          <str name="group">core</str>
+          <str name="prefix">CACHE</str>
+        </lst>
+      </lst>
+      <arr name="jsonQueries">
+        <!-- Cache lookups -->
+        <str>
+          .metrics | to_entries | .[] |
+          select(.key | startswith("solr.core.")) |
+          .key as $core |
+          .value | to_entries | .[] |
+          select(.key | startswith("CACHE.searcher.")) |
+          select(.value.lookups != null) |
+          {
+            name: "solr_cache_lookups_total",
+            type: "COUNTER",
+            help: "Total number of cache lookups",
+            label_names: ["core", "cache"],
+            label_values: [$core | split(".")[2], (.key | split(".")[2])],
+            value: .value.lookups
+          }
+        </str>
+
+        <!-- Cache hits -->
+        <str>
+          .metrics | to_entries | .[] |
+          select(.key | startswith("solr.core.")) |
+          .key as $core |
+          .value | to_entries | .[] |
+          select(.key | startswith("CACHE.searcher.")) |
+          select(.value.hits != null) |
+          {
+            name: "solr_cache_hits_total",
+            type: "COUNTER",
+            help: "Total number of cache hits",
+            label_names: ["core", "cache"],
+            label_values: [$core | split(".")[2], (.key | split(".")[2])],
+            value: .value.hits
+          }
+        </str>
+
+        <!-- Cache evictions -->
+        <str>
+          .metrics | to_entries | .[] |
+          select(.key | startswith("solr.core.")) |
+          .key as $core |
+          .value | to_entries | .[] |
+          select(.key | startswith("CACHE.searcher.")) |
+          select(.value.evictions != null) |
+          {
+            name: "solr_cache_evictions_total",
+            type: "COUNTER",
+            help: "Total number of cache evictions",
+            label_names: ["core", "cache"],
+            label_values: [$core | split(".")[2], (.key | split(".")[2])],
+            value: .value.evictions
+          }
+        </str>
+
+        <!-- Cache size -->
+        <str>
+          .metrics | to_entries | .[] |
+          select(.key | startswith("solr.core.")) |
+          .key as $core |
+          .value | to_entries | .[] |
+          select(.key | startswith("CACHE.searcher.")) |
+          select(.value.size != null) |
+          {
+            name: "solr_cache_size",
+            type: "GAUGE",
+            help: "Current cache size",
+            label_names: ["core", "cache"],
+            label_values: [$core | split(".")[2], (.key | split(".")[2])],
+            value: .value.size
+          }
+        </str>
+      </arr>
+    </lst>
+
+    <!-- ======================================================================
+         JVM METRICS
+         Monitors Java Virtual Machine memory and garbage collection
+         ====================================================================== -->
+    <lst name="request">
+      <lst name="query">
+        <str name="path">/admin/metrics</str>
+        <lst name="params">
+          <str name="group">jvm</str>
+        </lst>
+      </lst>
+      <arr name="jsonQueries">
+        <!-- Heap memory used -->
+        <str>
+          .metrics["solr.jvm"]["memory.heap.used"] |
+          {
+            name: "solr_jvm_heap_used_bytes",
+            type: "GAUGE",
+            help: "JVM heap memory used in bytes",
+            label_names: [],
+            label_values: [],
+            value: .value
+          }
+        </str>
+
+        <!-- Heap memory committed -->
+        <str>
+          .metrics["solr.jvm"]["memory.heap.committed"] |
+          {
+            name: "solr_jvm_heap_committed_bytes",
+            type: "GAUGE",
+            help: "JVM heap memory committed in bytes",
+            label_names: [],
+            label_values: [],
+            value: .value
+          }
+        </str>
+
+        <!-- Heap memory max -->
+        <str>
+          .metrics["solr.jvm"]["memory.heap.max"] |
+          {
+            name: "solr_jvm_heap_max_bytes",
+            type: "GAUGE",
+            help: "JVM heap memory maximum in bytes",
+            label_names: [],
+            label_values: [],
+            value: .value
+          }
+        </str>
+
+        <!-- GC count -->
+        <str>
+          .metrics["solr.jvm"] | to_entries | .[] |
+          select(.key | startswith("gc.G1")) |
+          select(.key | endswith(".count")) |
+          {
+            name: "solr_jvm_gc_count_total",
+            type: "COUNTER",
+            help: "Total number of garbage collections",
+            label_names: ["gc"],
+            label_values: [(.key | split(".")[1])],
+            value: .value.count
+          }
+        </str>
+
+        <!-- GC time -->
+        <str>
+          .metrics["solr.jvm"] | to_entries | .[] |
+          select(.key | startswith("gc.G1")) |
+          select(.key | endswith(".time")) |
+          {
+            name: "solr_jvm_gc_time_ms_total",
+            type: "COUNTER",
+            help: "Total garbage collection time in milliseconds",
+            label_names: ["gc"],
+            label_values: [(.key | split(".")[1])],
+            value: .value.count
+          }
+        </str>
+      </arr>
+    </lst>
+
+    <!-- ======================================================================
+         NODE/SYSTEM METRICS
+         Monitors node-level metrics
+         ====================================================================== -->
+    <lst name="request">
+      <lst name="query">
+        <str name="path">/admin/metrics</str>
+        <lst name="params">
+          <str name="group">node</str>
+        </lst>
+      </lst>
+      <arr name="jsonQueries">
+        <!-- Node uptime -->
+        <str>
+          .metrics["solr.node"]["CONTAINER.fs.totalSpace"] |
+          {
+            name: "solr_node_filesystem_total_bytes",
+            type: "GAUGE",
+            help: "Total filesystem space in bytes",
+            label_names: [],
+            label_values: [],
+            value: .value
+          }
+        </str>
+
+        <!-- Node usable space -->
+        <str>
+          .metrics["solr.node"]["CONTAINER.fs.usableSpace"] |
+          {
+            name: "solr_node_filesystem_usable_bytes",
+            type: "GAUGE",
+            help: "Usable filesystem space in bytes",
+            label_names: [],
+            label_values: [],
+            value: .value
+          }
+        </str>
+      </arr>
+    </lst>
+  </metrics>
+
+</config>

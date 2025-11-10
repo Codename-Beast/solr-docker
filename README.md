@@ -7,7 +7,22 @@
 A standalone Docker solution for running Apache Solr optimized for Moodle search. Works on bare systems as long as Docker is installed.
 
 **Author**: Codename-Beast(BSC) (Eledia)
-**Version**: 3.5.0
+**Version**: 3.6.0
+
+---
+
+## 📊 Prometheus Exporter
+
+Dieses Setup verwendet den **offiziellen Apache Solr Prometheus Exporter** für professionelles Monitoring.
+
+**Highlights:**
+- ✅ Offizieller Solr-Exporter (in Solr 9.x enthalten)
+- ✅ Optimierte Konfiguration für Moodle-Workloads
+- ✅ 30+ exportierte Metriken (Query, Cache, JVM, etc.)
+- ✅ Grafana-Dashboard included
+- ✅ Prometheus Alerting
+
+**Dokumentation**: Siehe [SOLR_EXPORTER.md](SOLR_EXPORTER.md) für vollständige Details
 
 ---
 ##  Known Issues (Minimal)
@@ -518,13 +533,14 @@ curl -u customer:password \
 
 ## 📚 Documentation
 
+- [SOLR_EXPORTER.md](SOLR_EXPORTER.md) - Prometheus Exporter documentation (NEW)
 - [MONITORING.md](MONITORING.md) - Complete monitoring guide
 - [CHANGELOG.md](CHANGELOG.md) - Version history
 - [MULTI_TENANCY.md](MULTI_TENANCY.md) - Multi-tenancy guide
 
 ## 📝 Version
 
-**Current Version**: 3.5.0 (Docker branch)
+**Current Version**: 3.6.0 (Docker branch)
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
 

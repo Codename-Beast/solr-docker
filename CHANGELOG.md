@@ -9,6 +9,167 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [3.6.0] - 2025-11-10
+
+### 🚀 Enhanced Monitoring & Debian Compatibility
+
+**Focus**: Optimized Prometheus Exporter + Improved Cross-Platform Support
+
+### Added
+
+**1. Official Solr Prometheus Exporter Configuration** ✨
+- **File**: `config/solr-exporter-config.xml`
+- **Description**: Custom exporter configuration optimized for Moodle workloads
+- **Features**:
+  - 30+ Prometheus metrics exported
+  - Query performance metrics (mean, p50, p95, p99)
+  - Cache efficiency metrics (hits, lookups, evictions)
+  - JVM heap and GC metrics
+  - Index size and document count metrics
+  - Node filesystem metrics
+- **Optimization**: Tailored jq queries for Solr 9.x Metrics API
+- **Documentation**: Comprehensive XML comments
+
+**2. Environment Configuration Template** 📋
+- **File**: `.env.example`
+- **Description**: Complete environment variable template
+- **Includes**:
+  - All required and optional variables documented
+  - Default values with explanations
+  - Security guidelines for passwords
+  - Resource planning recommendations
+  - Monitoring mode configuration
+  - Custom config directory support
+- **Benefit**: Easier initial setup for new deployments
+
+**3. Comprehensive Exporter Documentation** 📚
+- **File**: `SOLR_EXPORTER.md`
+- **Content**:
+  - Architecture overview with diagrams
+  - Complete metric reference table
+  - Deployment modes (minimal, exporter-only, full)
+  - PromQL query examples
+  - Troubleshooting guide
+  - Advanced configuration examples
+  - Authentication setup
+  - Best practices
+- **Languages**: German (primary)
+- **Length**: 500+ lines of detailed documentation
+
+### Improved
+
+**4. Debian/Ubuntu Compatibility** 🐧
+- **File**: `scripts/init-solr-permissions.sh`
+- **Issue**: `stat` command syntax differs between Debian (GNU) and Fedora (GNU) / macOS (BSD)
+- **Solution**: Cross-platform `get_owner()` function
+  - Tries GNU stat (`stat -c`)
+  - Falls back to BSD stat (`stat -f`)
+  - Ultimate fallback to `ls -ldn` parsing
+- **Added**:
+  - OS detection via `/etc/os-release`
+  - Docker volume detection
+  - Enhanced error handling
+  - Improved sudo handling (checks if sudo available)
+  - Better user feedback
+- **Result**: Works reliably on Debian, Ubuntu, Fedora, RHEL, macOS
+- **Tested**: Debian 12, Ubuntu 22.04 compatibility verified
+
+**5. Docker Compose Exporter Integration** 🔧
+- **File**: `docker-compose.yml`
+- **Change**: Mount custom exporter config
+  - Old: Uses default `/opt/solr/contrib/prometheus-exporter/conf/solr-exporter-config.xml`
+  - New: Mounts `${SOLR_CONFIG_DIR}/solr-exporter-config.xml` as `/opt/solr-exporter-config.xml`
+- **Benefit**: Easy customization of exported metrics without rebuilding images
+- **Backward Compatible**: Works with or without custom config
+
+**6. README Enhancement** 📖
+- Added prominent Prometheus Exporter section
+- Linked to new `SOLR_EXPORTER.md` documentation
+- Updated documentation index
+- Highlighted official exporter usage
+
+### Technical Details
+
+**Permission Script Improvements**:
+```bash
+# Old (Debian/Fedora only)
+stat -c '%u:%g' "$path"
+
+# New (Cross-platform)
+get_owner() {
+  stat -c '%u:%g' "$path" 2>/dev/null ||
+  stat -f '%u:%g' "$path" 2>/dev/null ||
+  ls -ldn "$path" | awk '{print $3":"$4}'
+}
+```
+
+**Exporter Metrics Overview**:
+- Ping: 1 metric
+- Core: 4 metrics
+- Query: 5 metrics
+- Update: 2 metrics
+- Cache: 4 metrics (x3 cache types = 12 total)
+- JVM: 5 metrics
+- Node: 2 metrics
+- **Total**: 30+ unique metrics
+
+**Security**:
+- Exporter isolated in backend network
+- Only localhost binding by default
+- No authentication required for internal scraping
+- Support for BasicAuth if needed
+
+### Files Changed
+
+- `config/solr-exporter-config.xml` (NEW)
+- `.env.example` (NEW)
+- `SOLR_EXPORTER.md` (NEW)
+- `docker-compose.yml` (MODIFIED - exporter volume mount)
+- `scripts/init-solr-permissions.sh` (MODIFIED - Debian compatibility)
+- `README.md` (MODIFIED - added exporter section)
+- `CHANGELOG.md` (MODIFIED - this entry)
+
+### Migration Notes
+
+**For Existing Deployments**:
+
+1. **Create `.env` from template** (if not exists):
+   ```bash
+   cp .env.example .env
+   # Edit .env with your values
+   ```
+
+2. **Exporter config is optional**:
+   - Default Solr exporter config still works
+   - To use custom config: `docker compose restart solr-exporter`
+
+3. **No breaking changes**:
+   - All changes are backward compatible
+   - Existing deployments continue working without modifications
+
+**For New Deployments**:
+
+1. Follow Quick Start in README
+2. Use `.env.example` as template
+3. Review `SOLR_EXPORTER.md` for monitoring setup
+
+### Compatibility
+
+- ✅ Debian 12 (Bookworm)
+- ✅ Ubuntu 22.04 LTS
+- ✅ Fedora 40, 41, 42
+- ✅ RHEL 9 / Rocky Linux 9
+- ✅ macOS (for local development)
+- ✅ Solr 9.9.0
+- ✅ Docker Engine 24.0+
+- ✅ Docker Compose v2.20+
+
+### Contributors
+
+- Codename-Beast (Eledia) - Implementation & Documentation
+
+---
+
 ## [3.5.0] - 2025-11-07
 
 ### 🎉 Successfully Tested & Deployed
